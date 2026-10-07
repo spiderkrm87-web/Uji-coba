@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Pixel Platformer Game</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+    
+    * {
+      user-select: none;
+      -webkit-user-select: none;
+      font-family: 'Press Start 2P', cursive;
+    }
+
+    body {
+      background-color: #0b0f19;
+      color: #fff;
+      overflow: hidden;
+      touch-action: manipulation;
+    }
+
+    canvas {
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+
+    .pixel-btn {
+      box-shadow: inset -4px -4px 0px 0px #1a202c, inset 4px 4px 0px 0px #edf2f7;
+    }
+
+    .pixel-btn:active {
+      box-shadow: inset 4px 4px 0px 0px #1a202c, inset -4px -4px 0px 0px #edf2f7;
+    }
+  </style>
+</head>
+<body class="flex flex-col items-center justify-center min-h-screen p-2 select-none">
+
+  <!-- Game Container -->
+  <div class="relative w-full max-w-4xl bg-slate-900 border-4 border-amber-500 rounded-lg overflow-hidden shadow-2xl flex flex-col items-center">
+    
+    <!-- Top HUD -->
+    <div class="w-full bg-slate-950 p-3 px-6 flex justify-between items-center text-xs md:text-sm text-amber-400 border-b-4 border-amber-500 z-10">
+      <div class="flex items-center gap-2">
+        <span class="text-amber-300">SCORE:</span>
+        <span id="score-display" class="text-white">0000</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="text-amber-300">COINS:</span>
+        <span id="coin-display" class="text-yellow-400">🪙 0</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="text-amber-300">LIVES:</span>
+        <span id="lives-display" class="text-red-500">❤️ ❤️ ❤️</span>
+      </div>
+    </div>
+
+    <!-- Canvas Screen -->
+    <div class="relative w-full aspect-[16/9] bg-sky-300 overflow-hidden flex items-center justify-center">
+      <canvas id="gameCanvas" class="w-full h-full block"></canvas>
+
+      <!-- Start / Game Over Overlay -->
+      <div id="overlay" class="absolute inset-0 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center gap-4 z-20 text-center p-4">
+        <h1 id="overlay-title" class="text-2xl md:text-4xl text-amber-400 drop-shadow-[0_4px_0_rgba(0,0,0,1)]">
+          PIXEL ADVENTURE
+        </h1>
+        <p id="overlay-desc" class="text-xs md:text-sm text-slate-300 max-w-md leading-relaxed">
+          Bantu si hero melewatin jurang, ngumpulin koin, dan nyampe ke Rumah Jamur!
+        </p>
+        <button id="start-btn" onclick="startGame()" class="pixel-btn bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-6 py-3 rounded text-sm md:text-base mt-2 transition-transform active:scale-95">
+          PLAY GAME 🚀
+        </button>
+      </div>
+    </div>
+
+    <!-- Mobile Touch Controls -->
+    <div class="w-full bg-slate-950 p-3 flex justify-between items-center border-t-4 border-amber-500 md:hidden">
+      <div class="flex gap-2">
+        <button id="btn-left" class="pixel-btn bg-slate-800 text-white w-14 h-14 rounded text-xl flex items-center justify-center active:bg-amber-500">◀</button>
+        <button id="btn-right" class="pixel-btn bg-slate-800 text-white w-14 h-14 rounded text-xl flex items-center justify-center active:bg-amber-500">▶</button>
+      </div>
+      <button id="btn-jump" class="pixel-btn bg-amber-500 text-slate-950 w-20 h-14 rounded font-bold text-xs flex items-center justify-center active:bg-amber-400">JUMP</button>
+    </div>
+
+  </div>
+
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // Canvas base dimensions (Game World Resolution)
+    canvas.width = 800;
+    canvas.height = 450;
+
+    // Game States
+    let gameRunning = false;
+    let score = 0;
+    let coinsCollected = 0;
+    let lives = 3;
+
+    // Assets Preloading
+    const assets = {
+      hero: new Image(),
+      bgSky: new Image(),
+      bgLevel1: new Image(),
+      bgLevel2: new Image(),
+      bgLevel3: new Image(),
+      coin: new Image()
+    };
+
+    // Standard Asset URLs (Menggunakan base64/placeholder siap panggil)
+    assets.hero.src = "https://i.ibb.co/68vM34R/hero.png"; 
+    assets.coin.src = "https://i.ibb.co/3kW2L7Z/coin.png";
+
+    // Player Object
+    const player = {
+      x: 50,
+      y: 200,
+      width: 36,
+      height: 48,
+      velocityX: 0,
+      velocityY: 0,
+      speed: 4,
+      jumpForce: -11,
+      gravity: 0.5,
+      isGrounded: false,
+      facingRight: true
+    };
+
+    // Platforms Data (Disesuaikan mirip dengan gambar background pulau melayang)
+    const platforms = [
+      { x: 0, y: 380, width: 220, height: 70 },       // Ground Awal
+      { x: 270, y: 320, width: 140, height: 40 },     // Pulau Melayang Tengah
+      { x: 460, y: 280, width: 120, height: 40 },     // Pulau Melayang 2
+      { x: 620, y: 360, width: 300, height: 90 }      // Area Rumah Jamur (Finish)
+    ];
+
+    // Coins Data
+    let coins = [
+      { x: 100, y: 330, collected: false },
+      { x: 320, y: 270, collected: false },
+      { x: 500, y: 230, collected: false },
+      { x: 680, y: 310, collected: false }
+    ];
+
+    // Finish Area (Rumah Jamur)
+    const finishLine = { x: 780, y: 280, width: 60, height: 80 };
+
+    // Key Controls Track
+    const keys = { right: false, left: false, up: false };
+
+    // Keyboard Listeners
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'ArrowRight' || e.code === 'KeyD') keys.right = true;
+      if (e.code === 'ArrowLeft' || e.code === 'KeyA') keys.left = true;
+      if (e.code === 'ArrowUp' || e.code === 'KeyW' || e.code === 'Space') {
+        if (!keys.up && player.isGrounded) {
+          player.velocityY = player.jumpForce;
+          player.isGrounded = false;
+        }
+        keys.up = true;
+      }
+    });
+
+    window.addEventListener('keyup', (e) => {
+      if (e.code === 'ArrowRight' || e.code === 'KeyD') keys.right = false;
+      if (e.code === 'ArrowLeft' || e.code === 'KeyA') keys.left = false;
+      if (e.code === 'ArrowUp' || e.code === 'KeyW' || e.code === 'Space') keys.up = false;
+    });
+
+    // Touch Buttons
+    const bindTouch = (id, key) => {
+      const btn = document.getElementById(id);
+      btn.addEventListener('touchstart', (e) => { e.preventDefault(); keys[key] = true; if(key==='up' && player.isGrounded){ player.velocityY = player.jumpForce; player.isGrounded = false; }});
+      btn.addEventListener('touchend', (e) => { e.preventDefault(); keys[key] = false; });
+    };
+    bindTouch('btn-left', 'left');
+    bindTouch('btn-right', 'right');
+    bindTouch('btn-jump', 'up');
+
+    function startGame() {
+      document.getElementById('overlay').classList.add('hidden');
+      resetPlayer();
+      score = 0;
+      coinsCollected = 0;
+      lives = 3;
+      coins.forEach(c => c.collected = false);
+      updateHUD();
+      gameRunning = true;
+      requestAnimationFrame(gameLoop);
+    }
+
+    function resetPlayer() {
+      player.x = 50;
+      player.y = 200;
+      player.velocityX = 0;
+      player.velocityY = 0;
+    }
+
+    function updateHUD() {
+      document.getElementById('score-display').innerText = String(score).padStart(4, '0');
+      document.getElementById('coin-display').innerText = `🪙 ${coinsCollected}`;
+      document.getElementById('lives-display').innerText = '❤️ '.repeat(lives);
+    }
+
+    function gameLoop() {
+      if (!gameRunning) return;
+
+      // 1. Movement Physics
+      if (keys.right) {
+        player.velocityX = player.speed;
+        player.facingRight = true;
+      } else if (keys.left) {
+        player.velocityX = -player.speed;
+        player.facingRight = false;
+      } else {
+        player.velocityX = 0;
+      }
+
+      player.velocityY += player.gravity;
+      player.x += player.velocityX;
+      player.y += player.velocityY;
+
+      // 2. Collision Detection with Platforms
+      player.isGrounded = false;
+      platforms.forEach(plat => {
+        if (
+          player.x + player.width > plat.x &&
+          player.x < plat.x + plat.width &&
+          player.y + player.height >= plat.y &&
+          player.y + player.height <= plat.y + 15 &&
+          player.velocityY >= 0
+        ) {
+          player.isGrounded = true;
+          player.velocityY = 0;
+          player.y = plat.y - player.height;
+        }
+      });
+
+      // 3. Collect Coins
+      coins.forEach(coin => {
+        if (!coin.collected && 
+            player.x < coin.x + 20 &&
+            player.x + player.width > coin.x &&
+            player.y < coin.y + 20 &&
+            player.y + player.height > coin.y) {
+          coin.collected = true;
+          coinsCollected++;
+          score += 100;
+          updateHUD();
+        }
+      });
+
+      // 4. Fall in Water / Pit (Death)
+      if (player.y > canvas.height) {
+        lives--;
+        updateHUD();
+        if (lives <= 0) {
+          endGame("GAME OVER", "Yah kamu jatuh ke air euy! Coba lagi!");
+          return;
+        } else {
+          resetPlayer();
+        }
+      }
+
+      // 5. Win Condition (Rumah Jamur)
+      if (player.x + player.width > finishLine.x && player.y + player.height > finishLine.y) {
+        endGame("STAGE CLEAR! 🎉", `Mantap Euy! Total Skor Kamu: ${score + 500}`);
+        return;
+      }
+
+      // Render Everything
+      draw();
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    function draw() {
+      // Clear Canvas (Sky Background)
+      ctx.fillStyle = '#60a5fa';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Draw Awan (Clouds)
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(100, 80, 25, 0, Math.PI * 2);
+      ctx.arc(130, 80, 35, 0, Math.PI * 2);
+      ctx.arc(160, 80, 25, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.arc(500, 100, 20, 0, Math.PI * 2);
+      ctx.arc(525, 100, 30, 0, Math.PI * 2);
+      ctx.arc(550, 100, 20, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Draw Air / Jurang
+      ctx.fillStyle = '#2563eb';
+      ctx.fillRect(0, 410, canvas.width, 40);
+
+      // Draw Platforms
+      platforms.forEach(plat => {
+        // Ground top grass
+        ctx.fillStyle = '#22c55e';
+        ctx.fillRect(plat.x, plat.y, plat.width, 10);
+        // Dirt body
+        ctx.fillStyle = '#78350f';
+        ctx.fillRect(plat.x, plat.y + 10, plat.width, plat.height - 10);
+      });
+
+      // Draw Coins
+      coins.forEach(coin => {
+        if (!coin.collected) {
+          ctx.fillStyle = '#eab308';
+          ctx.beginPath();
+          ctx.arc(coin.x + 10, coin.y + 10, 8, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#ca8a04';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+      });
+
+      // Draw Finish Mushroom House (Placeholder)
+      ctx.fillStyle = '#ef4444';
+      ctx.beginPath();
+      ctx.arc(finishLine.x + 30, finishLine.y + 20, 35, Math.PI, 0);
+      ctx.fill();
+      ctx.fillStyle = '#fde047';
+      ctx.fillRect(finishLine.x + 10, finishLine.y + 20, 40, 40);
+
+      // Draw Player Character (Sprite / Pixel Box)
+      ctx.fillStyle = '#1e293b'; // Jaket / Hoodie
+      ctx.fillRect(player.x, player.y + 12, player.width, 24);
+      
+      ctx.fillStyle = '#fca5a5'; // Muka
+      ctx.fillRect(player.x + 4, player.y, 28, 16);
+
+      ctx.fillStyle = '#451a03'; // Rambut
+      ctx.fillRect(player.x + 2, player.y - 4, 32, 10);
+
+      ctx.fillStyle = '#15803d'; // Celana Pendek
+      ctx.fillRect(player.x + 4, player.y + 34, player.width - 8, 10);
+
+      ctx.fillStyle = '#dc2626'; // Sepatu Merah
+      ctx.fillRect(player.x + (player.facingRight ? 12 : 0), player.y + 42, 16, 6);
+    }
+
+    function endGame(title, desc) {
+      gameRunning = false;
+      document.getElementById('overlay-title').innerText = title;
+      document.getElementById('overlay-desc').innerText = desc;
+      document.getElementById('start-btn').innerText = "REPLAY 🔄";
+      document.getElementById('overlay').classList.remove('hidden');
+    }
+  </script>
+</body>
+</html>
